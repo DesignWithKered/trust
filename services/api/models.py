@@ -354,3 +354,137 @@ class PasswordChangeRequest(BaseModel):
 class AdminPasswordResetRequest(BaseModel):
     """Admin password reset request model"""
     new_password: str = Field(..., min_length=6, description="New password must be at least 6 characters")
+
+# Chatbot Management Models
+class ChatbotStatus(str, Enum):
+    ACTIVE = "active"
+    INACTIVE = "inactive"
+    SUSPENDED = "suspended"
+    MONITORING = "monitoring"
+
+class ChatbotProvider(str, Enum):
+    OPENAI = "openai"
+    ANTHROPIC = "anthropic"
+    GOOGLE = "google"
+    META = "meta"
+    CUSTOM = "custom"
+    OTHER = "other"
+
+class ChatbotResponse(BaseModel):
+    """Response model for chatbots"""
+    id: UUID
+    name: str
+    description: Optional[str] = None
+    company_name: str
+    provider: ChatbotProvider
+    model: str
+    endpoint_url: Optional[str] = None
+    api_key_hash: str  # Hashed API key for security
+    status: ChatbotStatus
+    monitoring_enabled: bool
+    risk_threshold: int = Field(default=70, ge=0, le=100)
+    alert_on_risk: bool = True
+    created_at: datetime
+    updated_at: datetime
+    last_monitored: Optional[datetime] = None
+    total_conversations: int = 0
+    flagged_conversations: int = 0
+
+class ChatbotCreate(BaseModel):
+    """Create model for chatbots"""
+    name: str = Field(..., min_length=1, max_length=100)
+    description: Optional[str] = None
+    company_name: str = Field(..., min_length=1, max_length=100)
+    provider: ChatbotProvider
+    model: str = Field(..., min_length=1, max_length=100)
+    endpoint_url: Optional[str] = None
+    api_key: str = Field(..., min_length=1, description="API key for chatbot access")
+    monitoring_enabled: bool = True
+    risk_threshold: int = Field(default=70, ge=0, le=100)
+    alert_on_risk: bool = True
+
+class ChatbotUpdate(BaseModel):
+    """Update model for chatbots"""
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    description: Optional[str] = None
+    company_name: Optional[str] = Field(None, min_length=1, max_length=100)
+    provider: Optional[ChatbotProvider] = None
+    model: Optional[str] = Field(None, min_length=1, max_length=100)
+    endpoint_url: Optional[str] = None
+    api_key: Optional[str] = Field(None, min_length=1)
+    status: Optional[ChatbotStatus] = None
+    monitoring_enabled: Optional[bool] = None
+    risk_threshold: Optional[int] = Field(None, ge=0, le=100)
+    alert_on_risk: Optional[bool] = None
+
+class ChatbotFilters(BaseModel):
+    """Query filters for chatbot endpoints"""
+    status: Optional[ChatbotStatus] = None
+    provider: Optional[ChatbotProvider] = None
+    company_name: Optional[str] = None
+    monitoring_enabled: Optional[bool] = None
+    search: Optional[str] = None
+    page: int = Field(1, ge=1)
+    page_size: int = Field(50, ge=1, le=1000)
+
+class ChatbotConversation(BaseModel):
+    """Model for chatbot conversation monitoring"""
+    id: UUID
+    chatbot_id: UUID
+    conversation_id: str  # External conversation ID from chatbot
+    user_id: Optional[str] = None  # External user ID from chatbot
+    timestamp: datetime
+    prompt: str
+    response: str
+    risk_score: int
+    is_flagged: bool
+    flag_reason: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+    created_at: datetime
+
+class ChatbotConversationCreate(BaseModel):
+    """Create model for chatbot conversations"""
+    chatbot_id: UUID
+    conversation_id: str
+    user_id: Optional[str] = None
+    prompt: str
+    response: str
+    metadata: Optional[Dict[str, Any]] = None
+
+class ChatbotConversationFilters(BaseModel):
+    """Query filters for chatbot conversation endpoints"""
+    chatbot_id: Optional[UUID] = None
+    flagged: Optional[bool] = None
+    min_risk_score: Optional[int] = Field(None, ge=0, le=100)
+    max_risk_score: Optional[int] = Field(None, ge=0, le=100)
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+    search: Optional[str] = None
+    page: int = Field(1, ge=1)
+    page_size: int = Field(50, ge=1, le=1000)
+
+class ChatbotStatsResponse(BaseModel):
+    """Statistics response model for chatbots"""
+    total_chatbots: int
+    active_chatbots: int
+    monitoring_chatbots: int
+    total_conversations: int
+    flagged_conversations: int
+    flagged_rate: float
+    top_risk_chatbots: List[Dict[str, Any]]
+    conversations_by_hour: List[Dict[str, Any]]
+    risk_distribution: Dict[str, int]  # {"low": 100, "medium": 50, "high": 25, "critical": 10}
+
+class ChatbotHealthResponse(BaseModel):
+    """Health check response for individual chatbots"""
+    chatbot_id: UUID
+    status: str
+    last_response_time: Optional[float] = None  # in seconds
+    is_responding: bool
+    error_message: Optional[str] = None
+    checked_at: datetime
+
+class ChatbotBulkOperation(BaseModel):
+    """Bulk operations on chatbots"""
+    chatbot_ids: List[str]
+    operation: str = Field(..., pattern="^(enable_monitoring|disable_monitoring|activate|suspend|delete)$")

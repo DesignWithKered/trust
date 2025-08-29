@@ -16,6 +16,8 @@ import Anomalies from './pages/Anomalies';
 import ReviewQueue from './pages/ReviewQueue';
 import Alerts from './pages/Alerts';
 import Analytics from './pages/Analytics';
+import Chatbots from './pages/Chatbots';
+import ChatbotConversations from './pages/ChatbotConversations';
 import UserManagement from './pages/UserManagement';
 import Settings from './pages/Settings';
 import Profile from './pages/Profile';
@@ -51,6 +53,10 @@ function App() {
               <Route path="review" element={<ReviewQueue />} />
               <Route path="alerts" element={<Alerts />} />
               <Route path="analytics" element={<Analytics />} />
+              
+              {/* Chatbot Management section */}
+              <Route path="chatbots" element={<Chatbots />} />
+              <Route path="chatbot-conversations" element={<ChatbotConversations />} />
               
               {/* Administration section */}
               <Route path="users" element={<UserManagement />} />

@@ -12,7 +12,9 @@ import {
   Settings,
   Bell,
   Target,
-  BarChart3
+  BarChart3,
+  Bot,
+  MessageSquare
 } from 'lucide-react';
 
 const sidebarSections = [
@@ -32,6 +34,13 @@ const sidebarSections = [
       { name: 'Detection Rules', href: '/rules', icon: Shield, adminOnly: true },
       { name: 'Alerts', href: '/alerts', icon: Bell },
       { name: 'Analytics', href: '/analytics', icon: BarChart3 }
+    ]
+  },
+  {
+    title: 'Chatbot Management',
+    items: [
+      { name: 'Chatbots', href: '/chatbots', icon: Bot, adminOnly: true },
+      { name: 'Conversations', href: '/chatbot-conversations', icon: MessageSquare }
     ]
   },
   {
