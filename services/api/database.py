@@ -2196,3 +2196,722 @@ class DatabaseService:
             return f"{time_col} >= NOW() - INTERVAL '90 days'"
         else:
             return f"{time_col} >= NOW() - INTERVAL '7 days'"  # default
+
+    # Chatbot Management Methods
+    def create_chatbot(self, chatbot: 'ChatbotCreate') -> Dict[str, Any]:
+        """Create a new chatbot"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                
+                # Hash the API key for security
+                api_key_hash = encryption_service.hash_value(chatbot.api_key)
+                
+                query = """
+                    INSERT INTO chatbots (
+                        name, description, company_name, provider, model, endpoint_url,
+                        api_key_hash, status, monitoring_enabled, risk_threshold, alert_on_risk
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING *
+                """
+                
+                cursor.execute(query, (
+                    chatbot.name, chatbot.description, chatbot.company_name,
+                    chatbot.provider, chatbot.model, chatbot.endpoint_url,
+                    api_key_hash, 'active', chatbot.monitoring_enabled,
+                    chatbot.risk_threshold, chatbot.alert_on_risk
+                ))
+                
+                result = cursor.fetchone()
+                conn.commit()
+                
+                # Convert to dict and handle UUID serialization
+                chatbot_dict = dict(result)
+                chatbot_dict['id'] = str(chatbot_dict['id'])
+                chatbot_dict['created_at'] = chatbot_dict['created_at'].isoformat()
+                chatbot_dict['updated_at'] = chatbot_dict['updated_at'].isoformat()
+                
+                return chatbot_dict
+                
+        except Exception as e:
+            logger.error(f"Failed to create chatbot: {e}")
+            raise
+
+    def get_chatbots(self, filters: 'ChatbotFilters') -> Tuple[List[Dict], int]:
+        """Get paginated chatbots with filters"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                
+                # Build WHERE clause
+                where_conditions = []
+                params = []
+                
+                if filters.status:
+                    where_conditions.append("status = %s")
+                    params.append(filters.status)
+                
+                if filters.provider:
+                    where_conditions.append("provider = %s")
+                    params.append(filters.provider)
+                
+                if filters.company_name:
+                    where_conditions.append("company_name ILIKE %s")
+                    params.append(f"%{filters.company_name}%")
+                
+                if filters.monitoring_enabled is not None:
+                    where_conditions.append("monitoring_enabled = %s")
+                    params.append(filters.monitoring_enabled)
+                
+                if filters.search:
+                    where_conditions.append("(name ILIKE %s OR company_name ILIKE %s)")
+                    params.append(f"%{filters.search}%")
+                    params.append(f"%{filters.search}%")
+                
+                where_clause = " AND ".join(where_conditions) if where_conditions else "1=1"
+                
+                # Get total count
+                count_query = f"SELECT COUNT(*) FROM chatbots WHERE {where_clause}"
+                cursor.execute(count_query, params)
+                total_count = cursor.fetchone()[0]
+                
+                # Get paginated results
+                offset = (filters.page - 1) * filters.page_size
+                query = f"""
+                    SELECT * FROM chatbots 
+                    WHERE {where_clause}
+                    ORDER BY created_at DESC
+                    LIMIT %s OFFSET %s
+                """
+                
+                cursor.execute(query, params + [filters.page_size, offset])
+                results = cursor.fetchall()
+                
+                # Convert to list of dicts and handle UUID serialization
+                chatbots = []
+                for row in results:
+                    chatbot_dict = dict(row)
+                    chatbot_dict['id'] = str(chatbot_dict['id'])
+                    chatbot_dict['created_at'] = chatbot_dict['created_at'].isoformat()
+                    chatbot_dict['updated_at'] = chatbot_dict['updated_at'].isoformat()
+                    chatbots.append(chatbot_dict)
+                
+                return chatbots, total_count
+                
+        except Exception as e:
+            logger.error(f"Failed to get chatbots: {e}")
+            raise
+
+    def get_chatbot(self, chatbot_id: UUID) -> Optional[Dict[str, Any]]:
+        """Get chatbot by ID"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                
+                query = "SELECT * FROM chatbots WHERE id = %s"
+                cursor.execute(query, (str(chatbot_id),))
+                
+                result = cursor.fetchone()
+                if result:
+                    chatbot_dict = dict(result)
+                    chatbot_dict['id'] = str(chatbot_dict['id'])
+                    chatbot_dict['created_at'] = chatbot_dict['created_at'].isoformat()
+                    chatbot_dict['updated_at'] = chatbot_dict['updated_at'].isoformat()
+                    return chatbot_dict
+                
+                return None
+                
+        except Exception as e:
+            logger.error(f"Failed to get chatbot: {e}")
+            raise
+
+    def update_chatbot(self, chatbot_id: UUID, chatbot: 'ChatbotUpdate') -> Optional[Dict[str, Any]]:
+        """Update chatbot"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                
+                # Build UPDATE query dynamically
+                update_fields = []
+                params = []
+                
+                if chatbot.name is not None:
+                    update_fields.append("name = %s")
+                    params.append(chatbot.name)
+                
+                if chatbot.description is not None:
+                    update_fields.append("description = %s")
+                    params.append(chatbot.description)
+                
+                if chatbot.company_name is not None:
+                    update_fields.append("company_name = %s")
+                    params.append(chatbot.company_name)
+                
+                if chatbot.provider is not None:
+                    update_fields.append("provider = %s")
+                    params.append(chatbot.provider)
+                
+                if chatbot.model is not None:
+                    update_fields.append("model = %s")
+                    params.append(chatbot.model)
+                
+                if chatbot.endpoint_url is not None:
+                    update_fields.append("endpoint_url = %s")
+                    params.append(chatbot.endpoint_url)
+                
+                if chatbot.api_key is not None:
+                    update_fields.append("api_key_hash = %s")
+                    params.append(encryption_service.hash_value(chatbot.api_key))
+                
+                if chatbot.status is not None:
+                    update_fields.append("status = %s")
+                    params.append(chatbot.status)
+                
+                if chatbot.monitoring_enabled is not None:
+                    update_fields.append("monitoring_enabled = %s")
+                    params.append(chatbot.monitoring_enabled)
+                
+                if chatbot.risk_threshold is not None:
+                    update_fields.append("risk_threshold = %s")
+                    params.append(chatbot.risk_threshold)
+                
+                if chatbot.alert_on_risk is not None:
+                    update_fields.append("alert_on_risk = %s")
+                    params.append(chatbot.alert_on_risk)
+                
+                if not update_fields:
+                    return self.get_chatbot(chatbot_id)
+                
+                update_fields.append("updated_at = NOW()")
+                params.append(str(chatbot_id))
+                
+                query = f"""
+                    UPDATE chatbots 
+                    SET {', '.join(update_fields)}
+                    WHERE id = %s
+                    RETURNING *
+                """
+                
+                cursor.execute(query, params)
+                result = cursor.fetchone()
+                
+                if result:
+                    conn.commit()
+                    chatbot_dict = dict(result)
+                    chatbot_dict['id'] = str(chatbot_dict['id'])
+                    chatbot_dict['created_at'] = chatbot_dict['created_at'].isoformat()
+                    chatbot_dict['updated_at'] = chatbot_dict['updated_at'].isoformat()
+                    return chatbot_dict
+                
+                return None
+                
+        except Exception as e:
+            logger.error(f"Failed to update chatbot: {e}")
+            raise
+
+    def delete_chatbot(self, chatbot_id: UUID) -> bool:
+        """Delete chatbot"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                query = "DELETE FROM chatbots WHERE id = %s"
+                cursor.execute(query, (str(chatbot_id),))
+                
+                if cursor.rowcount > 0:
+                    conn.commit()
+                    return True
+                
+                return False
+                
+        except Exception as e:
+            logger.error(f"Failed to delete chatbot: {e}")
+            raise
+
+    def bulk_chatbot_operation(self, operation: 'ChatbotBulkOperation') -> int:
+        """Perform bulk operations on chatbots"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                if operation.operation == "enable_monitoring":
+                    query = "UPDATE chatbots SET monitoring_enabled = true WHERE id = ANY(%s)"
+                elif operation.operation == "disable_monitoring":
+                    query = "UPDATE chatbots SET monitoring_enabled = false WHERE id = ANY(%s)"
+                elif operation.operation == "activate":
+                    query = "UPDATE chatbots SET status = 'active' WHERE id = ANY(%s)"
+                elif operation.operation == "suspend":
+                    query = "UPDATE chatbots SET status = 'suspended' WHERE id = ANY(%s)"
+                elif operation.operation == "delete":
+                    query = "DELETE FROM chatbots WHERE id = ANY(%s)"
+                else:
+                    raise ValueError(f"Invalid operation: {operation.operation}")
+                
+                cursor.execute(query, (operation.chatbot_ids,))
+                
+                if operation.operation != "delete":
+                    conn.commit()
+                
+                return cursor.rowcount
+                
+        except Exception as e:
+            logger.error(f"Failed to perform bulk chatbot operation: {e}")
+            raise
+
+    def check_chatbot_health(self, chatbot_id: UUID) -> Dict[str, Any]:
+        """Check chatbot health and responsiveness"""
+        try:
+            chatbot = self.get_chatbot(chatbot_id)
+            if not chatbot:
+                raise ValueError("Chatbot not found")
+            
+            # For now, return basic health info
+            # In a real implementation, you would test the chatbot endpoint
+            return {
+                "chatbot_id": str(chatbot_id),
+                "status": "healthy",
+                "last_response_time": None,
+                "is_responding": True,
+                "error_message": None,
+                "checked_at": datetime.utcnow().isoformat()
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to check chatbot health: {e}")
+            raise
+
+    def get_chatbot_stats(self) -> Dict[str, Any]:
+        """Get chatbot statistics"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                
+                # Get basic counts
+                cursor.execute("SELECT COUNT(*) FROM chatbots")
+                total_chatbots = cursor.fetchone()[0]
+                
+                cursor.execute("SELECT COUNT(*) FROM chatbots WHERE status = 'active'")
+                active_chatbots = cursor.fetchone()[0]
+                
+                cursor.execute("SELECT COUNT(*) FROM chatbots WHERE monitoring_enabled = true")
+                monitoring_chatbots = cursor.fetchone()[0]
+                
+                # Get conversation stats
+                cursor.execute("SELECT COUNT(*) FROM chatbot_conversations")
+                total_conversations = cursor.fetchone()[0]
+                
+                cursor.execute("SELECT COUNT(*) FROM chatbot_conversations WHERE is_flagged = true")
+                flagged_conversations = cursor.fetchone()[0]
+                
+                flagged_rate = (flagged_conversations / total_conversations * 100) if total_conversations > 0 else 0
+                
+                # Get top risk chatbots
+                cursor.execute("""
+                    SELECT c.name, c.company_name, COUNT(conv.id) as conversation_count,
+                           AVG(conv.risk_score) as avg_risk_score
+                    FROM chatbots c
+                    LEFT JOIN chatbot_conversations conv ON c.id = conv.chatbot_id
+                    GROUP BY c.id, c.name, c.company_name
+                    ORDER BY avg_risk_score DESC NULLS LAST
+                    LIMIT 5
+                """)
+                top_risk_chatbots = cursor.fetchall()
+                
+                # Convert to list of dicts
+                top_risk_list = []
+                for row in top_risk_chatbots:
+                    chatbot_dict = dict(row)
+                    if chatbot_dict['avg_risk_score']:
+                        chatbot_dict['avg_risk_score'] = round(float(chatbot_dict['avg_risk_score']), 2)
+                    top_risk_list.append(chatbot_dict)
+                
+                # Get conversations by hour (last 24 hours)
+                cursor.execute("""
+                    SELECT 
+                        EXTRACT(HOUR FROM created_at) as hour,
+                        COUNT(*) as count
+                    FROM chatbot_conversations
+                    WHERE created_at >= NOW() - INTERVAL '24 hours'
+                    GROUP BY EXTRACT(HOUR FROM created_at)
+                    ORDER BY hour
+                """)
+                conversations_by_hour = cursor.fetchall()
+                
+                # Convert to list of dicts
+                hourly_list = []
+                for row in conversations_by_hour:
+                    hourly_list.append({
+                        "hour": int(row['hour']),
+                        "count": row['count']
+                    })
+                
+                # Get risk distribution
+                cursor.execute("""
+                    SELECT 
+                        CASE 
+                            WHEN risk_score < 25 THEN 'low'
+                            WHEN risk_score < 50 THEN 'medium'
+                            WHEN risk_score < 75 THEN 'high'
+                            ELSE 'critical'
+                        END as risk_level,
+                        COUNT(*) as count
+                    FROM chatbot_conversations
+                    GROUP BY risk_level
+                    ORDER BY risk_level
+                """)
+                risk_distribution = cursor.fetchall()
+                
+                # Convert to dict
+                risk_dict = {}
+                for row in risk_distribution:
+                    risk_dict[row['risk_level']] = row['count']
+                
+                return {
+                    "total_chatbots": total_chatbots,
+                    "active_chatbots": active_chatbots,
+                    "monitoring_chatbots": monitoring_chatbots,
+                    "total_conversations": total_conversations,
+                    "flagged_conversations": flagged_conversations,
+                    "flagged_rate": round(flagged_rate, 2),
+                    "top_risk_chatbots": top_risk_list,
+                    "conversations_by_hour": hourly_list,
+                    "risk_distribution": risk_dict
+                }
+                
+        except Exception as e:
+            logger.error(f"Failed to get chatbot stats: {e}")
+            raise
+
+    def create_chatbot_conversation(self, conversation: 'ChatbotConversationCreate') -> Dict[str, Any]:
+        """Create a new chatbot conversation"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                
+                # Calculate risk score using existing detection rules
+                risk_score = self._calculate_conversation_risk(conversation.prompt, conversation.response)
+                is_flagged = risk_score >= 70  # Default threshold
+                
+                query = """
+                    INSERT INTO chatbot_conversations (
+                        chatbot_id, conversation_id, user_id, timestamp, prompt, response,
+                        risk_score, is_flagged, metadata
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING *
+                """
+                
+                cursor.execute(query, (
+                    str(conversation.chatbot_id), conversation.conversation_id,
+                    conversation.user_id, datetime.utcnow(), conversation.prompt,
+                    conversation.response, risk_score, is_flagged,
+                    json.dumps(conversation.metadata) if conversation.metadata else None
+                ))
+                
+                result = cursor.fetchone()
+                conn.commit()
+                
+                # Update chatbot conversation counts
+                self._update_chatbot_counts(str(conversation.chatbot_id))
+                
+                # Convert to dict and handle UUID serialization
+                conversation_dict = dict(result)
+                conversation_dict['id'] = str(conversation_dict['id'])
+                conversation_dict['chatbot_id'] = str(conversation_dict['chatbot_id'])
+                conversation_dict['timestamp'] = conversation_dict['timestamp'].isoformat()
+                conversation_dict['created_at'] = conversation_dict['created_at'].isoformat()
+                
+                return conversation_dict
+                
+        except Exception as e:
+            logger.error(f"Failed to create chatbot conversation: {e}")
+            raise
+
+    def get_chatbot_conversations(self, filters: 'ChatbotConversationFilters') -> Tuple[List[Dict], int]:
+        """Get paginated chatbot conversations with filters"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                
+                # Build WHERE clause
+                where_conditions = []
+                params = []
+                
+                if filters.chatbot_id:
+                    where_conditions.append("chatbot_id = %s")
+                    params.append(str(filters.chatbot_id))
+                
+                if filters.flagged is not None:
+                    where_conditions.append("is_flagged = %s")
+                    params.append(filters.flagged)
+                
+                if filters.min_risk_score is not None:
+                    where_conditions.append("risk_score >= %s")
+                    params.append(filters.min_risk_score)
+                
+                if filters.max_risk_score is not None:
+                    where_conditions.append("risk_score <= %s")
+                    params.append(filters.max_risk_score)
+                
+                if filters.start_date:
+                    where_conditions.append("created_at >= %s")
+                    params.append(filters.start_date)
+                
+                if filters.end_date:
+                    where_conditions.append("created_at <= %s")
+                    params.append(filters.end_date)
+                
+                if filters.search:
+                    where_conditions.append("(prompt ILIKE %s OR response ILIKE %s)")
+                    params.append(f"%{filters.search}%")
+                    params.append(f"%{filters.search}%")
+                
+                where_clause = " AND ".join(where_conditions) if where_conditions else "1=1"
+                
+                # Get total count
+                count_query = f"SELECT COUNT(*) FROM chatbot_conversations WHERE {where_clause}"
+                cursor.execute(count_query, params)
+                total_count = cursor.fetchone()[0]
+                
+                # Get paginated results
+                offset = (filters.page - 1) * filters.page_size
+                query = f"""
+                    SELECT * FROM chatbot_conversations 
+                    WHERE {where_clause}
+                    ORDER BY created_at DESC
+                    LIMIT %s OFFSET %s
+                """
+                
+                cursor.execute(query, params + [filters.page_size, offset])
+                results = cursor.fetchall()
+                
+                # Convert to list of dicts and handle UUID serialization
+                conversations = []
+                for row in results:
+                    conversation_dict = dict(row)
+                    conversation_dict['id'] = str(conversation_dict['id'])
+                    conversation_dict['chatbot_id'] = str(conversation_dict['chatbot_id'])
+                    conversation_dict['timestamp'] = conversation_dict['timestamp'].isoformat()
+                    conversation_dict['created_at'] = conversation_dict['created_at'].isoformat()
+                    conversations.append(conversation_dict)
+                
+                return conversations, total_count
+                
+        except Exception as e:
+            logger.error(f"Failed to get chatbot conversations: {e}")
+            raise
+
+    def get_chatbot_conversation(self, conversation_id: UUID) -> Optional[Dict[str, Any]]:
+        """Get chatbot conversation by ID"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                
+                query = "SELECT * FROM chatbot_conversations WHERE id = %s"
+                cursor.execute(query, (str(conversation_id),))
+                
+                result = cursor.fetchone()
+                if result:
+                    conversation_dict = dict(result)
+                    conversation_dict['id'] = str(conversation_dict['id'])
+                    conversation_dict['chatbot_id'] = str(conversation_dict['chatbot_id'])
+                    conversation_dict['timestamp'] = conversation_dict['timestamp'].isoformat()
+                    conversation_dict['created_at'] = conversation_dict['created_at'].isoformat()
+                    return conversation_dict
+                
+                return None
+                
+        except Exception as e:
+            logger.error(f"Failed to get chatbot conversation: {e}")
+            raise
+
+    def monitor_chatbot_response(self, chatbot_id: UUID, prompt: str, response: str, 
+                                conversation_id: Optional[str] = None, user_id: Optional[str] = None,
+                                metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Monitor a chatbot response for problematic content"""
+        try:
+            # Calculate risk score
+            risk_score = self._calculate_conversation_risk(prompt, response)
+            
+            # Check if response should be flagged
+            chatbot = self.get_chatbot(chatbot_id)
+            if not chatbot:
+                raise ValueError("Chatbot not found")
+            
+            is_flagged = risk_score >= chatbot.get('risk_threshold', 70)
+            
+            # Create conversation record
+            conversation_data = ChatbotConversationCreate(
+                chatbot_id=chatbot_id,
+                conversation_id=conversation_id or f"monitor_{datetime.utcnow().timestamp()}",
+                user_id=user_id,
+                prompt=prompt,
+                response=response,
+                metadata=metadata
+            )
+            
+            conversation = self.create_chatbot_conversation(conversation_data)
+            
+            # Update conversation with calculated values
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                query = """
+                    UPDATE chatbot_conversations 
+                    SET risk_score = %s, is_flagged = %s
+                    WHERE id = %s
+                """
+                cursor.execute(query, (risk_score, is_flagged, conversation['id']))
+                conn.commit()
+            
+            # Create alert if flagged and alerts are enabled
+            if is_flagged and chatbot.get('alert_on_risk', True):
+                self._create_chatbot_alert(chatbot_id, conversation['id'], risk_score, prompt, response)
+            
+            return {
+                "conversation_id": conversation['id'],
+                "risk_score": risk_score,
+                "is_flagged": is_flagged,
+                "flag_reason": self._get_flag_reason(risk_score),
+                "alert_created": is_flagged and chatbot.get('alert_on_risk', True)
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to monitor chatbot response: {e}")
+            raise
+
+    def _calculate_conversation_risk(self, prompt: str, response: str) -> int:
+        """Calculate risk score for a conversation using detection rules"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                
+                # Get active detection rules
+                cursor.execute("""
+                    SELECT * FROM detection_rules 
+                    WHERE is_active = true 
+                    ORDER BY priority DESC, points DESC
+                """)
+                rules = cursor.fetchall()
+                
+                total_score = 0
+                
+                for rule in rules:
+                    if rule['rule_type'] == 'keyword':
+                        # Check for keywords in prompt or response
+                        if rule['pattern'].lower() in prompt.lower() or rule['pattern'].lower() in response.lower():
+                            total_score += rule['points']
+                            if rule['stop_on_match']:
+                                break
+                    
+                    elif rule['rule_type'] == 'regex':
+                        import re
+                        try:
+                            if re.search(rule['pattern'], prompt) or re.search(rule['pattern'], response):
+                                total_score += rule['points']
+                                if rule['stop_on_match']:
+                                    break
+                        except re.error:
+                            logger.warning(f"Invalid regex pattern: {rule['pattern']}")
+                    
+                    elif rule['rule_type'] == 'custom_scoring':
+                        # Custom scoring logic can be implemented here
+                        pass
+                
+                # Cap the score at 100
+                return min(total_score, 100)
+                
+        except Exception as e:
+            logger.error(f"Failed to calculate conversation risk: {e}")
+            return 0
+
+    def _update_chatbot_counts(self, chatbot_id: str):
+        """Update chatbot conversation counts"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Update total conversations
+                cursor.execute("""
+                    UPDATE chatbots 
+                    SET total_conversations = (
+                        SELECT COUNT(*) FROM chatbot_conversations WHERE chatbot_id = %s
+                    )
+                    WHERE id = %s
+                """, (chatbot_id, chatbot_id))
+                
+                # Update flagged conversations
+                cursor.execute("""
+                    UPDATE chatbots 
+                    SET flagged_conversations = (
+                        SELECT COUNT(*) FROM chatbot_conversations 
+                        WHERE chatbot_id = %s AND is_flagged = true
+                    )
+                    WHERE id = %s
+                """, (chatbot_id, chatbot_id))
+                
+                # Update last monitored timestamp
+                cursor.execute("""
+                    UPDATE chatbots 
+                    SET last_monitored = NOW()
+                    WHERE id = %s
+                """, (chatbot_id, chatbot_id))
+                
+                conn.commit()
+                
+        except Exception as e:
+            logger.error(f"Failed to update chatbot counts: {e}")
+
+    def _create_chatbot_alert(self, chatbot_id: UUID, conversation_id: str, risk_score: int, 
+                              prompt: str, response: str):
+        """Create an alert for a flagged chatbot conversation"""
+        try:
+            chatbot = self.get_chatbot(chatbot_id)
+            if not chatbot:
+                return
+            
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Create alert
+                alert_query = """
+                    INSERT INTO alerts (
+                        title, description, severity, alert_type, source_type, source_id,
+                        related_request_id, metadata, status
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """
+                
+                severity = "critical" if risk_score >= 90 else "high" if risk_score >= 70 else "medium"
+                
+                cursor.execute(alert_query, (
+                    f"Chatbot Response Flagged - {chatbot['company_name']}",
+                    f"Chatbot '{chatbot['name']}' generated a response with risk score {risk_score}",
+                    severity,
+                    "detection_rule",
+                    "chatbot",
+                    str(chatbot_id),
+                    conversation_id,
+                    json.dumps({
+                        "chatbot_name": chatbot['name'],
+                        "company_name": chatbot['company_name'],
+                        "prompt_preview": prompt[:100] + "..." if len(prompt) > 100 else prompt,
+                        "response_preview": response[:100] + "..." if len(response) > 100 else response
+                    }),
+                    "new"
+                ))
+                
+                conn.commit()
+                
+        except Exception as e:
+            logger.error(f"Failed to create chatbot alert: {e}")
+
+    def _get_flag_reason(self, risk_score: int) -> str:
+        """Get human-readable flag reason based on risk score"""
+        if risk_score >= 90:
+            return "Critical risk detected"
+        elif risk_score >= 70:
+            return "High risk detected"
+        elif risk_score >= 50:
+            return "Medium risk detected"
+        elif risk_score >= 25:
+            return "Low risk detected"
+        else:
+            return "No significant risk detected"

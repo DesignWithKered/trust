@@ -15,7 +15,10 @@ from models import (
     SessionResponse, SessionDetail, SessionFilters, BulkRuleOperation, RuleTemplate,
     AlertResponse, AlertCreate, AlertUpdate, AlertFilters, BulkAlertOperation,
     SystemSettingResponse, SystemSettingUpdate, DatabaseStatsResponse, ExportRequest,
-    UserResponse, UserCreate, UserUpdate, PasswordChangeRequest, AdminPasswordResetRequest
+    UserResponse, UserCreate, UserUpdate, PasswordChangeRequest, AdminPasswordResetRequest,
+    ChatbotResponse, ChatbotCreate, ChatbotUpdate, ChatbotFilters, ChatbotBulkOperation,
+    ChatbotConversation, ChatbotConversationCreate, ChatbotConversationFilters,
+    ChatbotStatsResponse, ChatbotHealthResponse
 )
 from auth import (
     authenticate_user, create_token_response, get_current_user, get_admin_user, update_admin_password
@@ -1534,6 +1537,214 @@ async def refresh_analytics_aggregates(admin_user: User = Depends(get_admin_user
         return {"message": "Analytics aggregates refreshed successfully"}
     except Exception as e:
         logger.error(f"Failed to refresh analytics aggregates: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# Chatbot Management Endpoints
+@app.post("/chatbots", response_model=ChatbotResponse)
+async def create_chatbot(
+    chatbot: ChatbotCreate,
+    admin_user: User = Depends(get_admin_user)
+):
+    """Create a new chatbot for monitoring"""
+    try:
+        return db_service.create_chatbot(chatbot)
+    except Exception as e:
+        logger.error(f"Failed to create chatbot: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.get("/chatbots", response_model=PaginatedResponse)
+async def get_chatbots(
+    status: Optional[str] = None,
+    provider: Optional[str] = None,
+    company_name: Optional[str] = None,
+    monitoring_enabled: Optional[bool] = None,
+    search: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 50,
+    current_user: User = Depends(get_current_user)
+):
+    """Get paginated list of chatbots"""
+    try:
+        filters = ChatbotFilters(
+            status=status,
+            provider=provider,
+            company_name=company_name,
+            monitoring_enabled=monitoring_enabled,
+            search=search,
+            page=page,
+            page_size=page_size
+        )
+        return db_service.get_chatbots(filters)
+    except Exception as e:
+        logger.error(f"Failed to get chatbots: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.get("/chatbots/{chatbot_id}", response_model=ChatbotResponse)
+async def get_chatbot(
+    chatbot_id: UUID,
+    current_user: User = Depends(get_current_user)
+):
+    """Get chatbot by ID"""
+    try:
+        chatbot = db_service.get_chatbot(chatbot_id)
+        if not chatbot:
+            raise HTTPException(status_code=404, detail="Chatbot not found")
+        return chatbot
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get chatbot: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.put("/chatbots/{chatbot_id}", response_model=ChatbotResponse)
+async def update_chatbot(
+    chatbot_id: UUID,
+    chatbot: ChatbotUpdate,
+    admin_user: User = Depends(get_admin_user)
+):
+    """Update chatbot"""
+    try:
+        updated_chatbot = db_service.update_chatbot(chatbot_id, chatbot)
+        if not updated_chatbot:
+            raise HTTPException(status_code=404, detail="Chatbot not found")
+        return updated_chatbot
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update chatbot: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.delete("/chatbots/{chatbot_id}")
+async def delete_chatbot(
+    chatbot_id: UUID,
+    admin_user: User = Depends(get_admin_user)
+):
+    """Delete chatbot"""
+    try:
+        success = db_service.delete_chatbot(chatbot_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Chatbot not found")
+        return {"message": "Chatbot deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete chatbot: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.post("/chatbots/bulk-operation")
+async def bulk_chatbot_operation(
+    operation: ChatbotBulkOperation,
+    admin_user: User = Depends(get_admin_user)
+):
+    """Perform bulk operations on chatbots"""
+    try:
+        result = db_service.bulk_chatbot_operation(operation)
+        return {"message": f"Bulk operation completed successfully", "affected_count": result}
+    except Exception as e:
+        logger.error(f"Failed to perform bulk chatbot operation: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.get("/chatbots/{chatbot_id}/health", response_model=ChatbotHealthResponse)
+async def get_chatbot_health(
+    chatbot_id: UUID,
+    current_user: User = Depends(get_current_user)
+):
+    """Check chatbot health and responsiveness"""
+    try:
+        return db_service.check_chatbot_health(chatbot_id)
+    except Exception as e:
+        logger.error(f"Failed to check chatbot health: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.get("/chatbots/stats", response_model=ChatbotStatsResponse)
+async def get_chatbot_stats(current_user: User = Depends(get_current_user)):
+    """Get chatbot statistics"""
+    try:
+        return db_service.get_chatbot_stats()
+    except Exception as e:
+        logger.error(f"Failed to get chatbot stats: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+# Chatbot Conversation Monitoring Endpoints
+@app.post("/chatbots/conversations", response_model=ChatbotConversation)
+async def create_chatbot_conversation(
+    conversation: ChatbotConversationCreate,
+    current_user: User = Depends(get_current_user)
+):
+    """Create a new chatbot conversation for monitoring"""
+    try:
+        return db_service.create_chatbot_conversation(conversation)
+    except Exception as e:
+        logger.error(f"Failed to create chatbot conversation: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.get("/chatbots/conversations", response_model=PaginatedResponse)
+async def get_chatbot_conversations(
+    chatbot_id: Optional[UUID] = None,
+    flagged: Optional[bool] = None,
+    min_risk_score: Optional[int] = None,
+    max_risk_score: Optional[int] = None,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    search: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 50,
+    current_user: User = Depends(get_current_user)
+):
+    """Get paginated list of chatbot conversations"""
+    try:
+        filters = ChatbotConversationFilters(
+            chatbot_id=chatbot_id,
+            flagged=flagged,
+            min_risk_score=min_risk_score,
+            max_risk_score=max_risk_score,
+            start_date=start_date,
+            end_date=end_date,
+            search=search,
+            page=page,
+            page_size=page_size
+        )
+        return db_service.get_chatbot_conversations(filters)
+    except Exception as e:
+        logger.error(f"Failed to get chatbot conversations: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.get("/chatbots/conversations/{conversation_id}", response_model=ChatbotConversation)
+async def get_chatbot_conversation(
+    conversation_id: UUID,
+    current_user: User = Depends(get_current_user)
+):
+    """Get chatbot conversation by ID"""
+    try:
+        conversation = db_service.get_chatbot_conversation(conversation_id)
+        if not conversation:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        return conversation
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get chatbot conversation: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.post("/chatbots/monitor")
+async def monitor_chatbot_responses(
+    chatbot_id: UUID,
+    prompt: str,
+    response: str,
+    conversation_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+    current_user: User = Depends(get_current_user)
+):
+    """Monitor a chatbot response for problematic content"""
+    try:
+        result = db_service.monitor_chatbot_response(
+            chatbot_id, prompt, response, conversation_id, user_id, metadata
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Failed to monitor chatbot response: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
